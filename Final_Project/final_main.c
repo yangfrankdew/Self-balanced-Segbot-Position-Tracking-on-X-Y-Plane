@@ -145,7 +145,6 @@ float Kp = 3.0;
 float Ki = 20.0;
 float Kd = 0.08;
 
-
 // Kalman Filter
 float T = 0.001; //sample rate, 1ms
 float Q = 0.01; // made global to enable changing in runtime
@@ -158,6 +157,25 @@ float kalman_K = 0;
 int32_t timecount = 0;
 int16_t calibration_state = 0;
 int32_t calibration_count = 0;
+
+
+// (Final Project) position tracking variables
+float xm = 0.0; // m, Wheel axle midpoint position in X axis
+float ym = 0.0; // m, Wheel axle midpoint position in Y axis
+float xm_dot = 0.0; // m/s, Midpoint velocity on X axis
+float ym_dot = 0.0; // m/s, Midpoint velocity on Y axis
+float xm_dot_1 = 0.0;
+float ym_dot_1 = 0.0;
+float Rw = ((0.3048/9.431778)+(0.3048/9.342178))/2.0; // m, Wheel radius (9.9.431778 and 9.342178 are the Rads per ft of the wheels, measured in Lab4)
+float theta_left = 0.0; // Rad, Left wheel angle (make it possible to reset LeftWheel and RightWheel)
+float theta_right = 0.0; // Rad, Right wheel angle
+float theta_dot = 0.0; // Rad/s, Average turning speed of wheels
+float theta = 0.0; // Rad, Average angle of left and right wheel
+float theta_1 = 0.0;
+float phi = 0.0; // Rad, Body yaw angle
+float W = 0.182; // m, Distance between the centers of the two wheels
+int reset = 0; // Reset flag for reset position to zero (also set LeftWheel and RightWheel to zero)
+
 
 void setDACA(float dacouta0) {
     if (dacouta0 > 3.0) dacouta0 = 3.0;
@@ -531,7 +549,7 @@ void main(void){
     while(1)
     {
         if (UARTPrint == 1 ) {
-            serial_printf(&SerialA, "tilt: %.3f, gyro: %.3f, LeftWheel: %.3f, RightWheel: %.3f\r\n", tilt_value, gyro_value, LeftWheel, RightWheel);
+            serial_printf(&SerialA, "LeftWheel: %.3f, RightWheel: %.3f, theta_left: %.3f, theta_right: %.3f, X: %.3f, Y: %.3f \r\n",LeftWheel,RightWheel,theta_left,theta_right,xm,ym);
             UARTPrint = 0;
         }
     }
@@ -584,14 +602,45 @@ __interrupt void SWI_isr(void) {
 
     v_l_1 = v_l;
     v_r_1 = v_r;
-    LeftWheel_1 = LeftWheel;
-    RightWheel_1 = RightWheel;
 
     uLeft = (Ubal/2.0) + turn + FwdBackOffset;
     uRight = (Ubal/2.0) - turn + FwdBackOffset;
 
     setEPWM6A(uLeft);
     setEPWM6B(-uRight);
+
+    // Final Project add code here
+    if (reset == 1) {
+        xm = 0.0;
+        ym = 0.0;
+        xm_dot = 0.0;
+        ym_dot = 0.0;
+        xm_dot_1 = 0.0;
+        ym_dot_1 = 0.0;
+        theta_dot = 0.0;
+        theta = 0.0;
+        theta_1 = 0.0;
+        phi = 0.0;
+        theta_left = 0.0;
+        theta_right =0.0;
+        reset = 0;
+    }
+    theta_left = theta_left + (LeftWheel - LeftWheel_1);
+    theta_right = theta_right + (RightWheel - RightWheel_1);
+    theta = 0.5 * (theta_left + theta_right);
+    phi = Rw / W * (theta_left - theta_right);
+    theta_dot = (theta - theta_1) / 0.004;
+    xm_dot = Rw * theta_dot * cos(phi);
+    ym_dot = Rw * theta_dot * sin(phi);
+    xm = xm + 0.004 * (xm_dot + xm_dot_1);
+    ym = ym + 0.004 * (ym_dot + ym_dot_1);
+
+    theta_1 = theta;
+    xm_dot = xm_dot_1;
+    ym_dot = ym_dot_1;
+    LeftWheel_1 = LeftWheel;
+    RightWheel_1 = RightWheel;
+
 
     numSWIcalls++;
     DINT;
@@ -870,15 +919,19 @@ __interrupt void SPIB_isr(void){
 //use WASD to control sebot moving
 void serialRXA(serial_t *s, char data) {
     numRXA ++;
-    if (data == 'a') {
+    if (data == 'a') {                              // turn left
         turnrate = turnrate - 0.2;
-    } else if (data == 'd') {
+    } else if (data == 'd') {                       // turn right
         turnrate = turnrate + 0.2;
-    } else if (data == 'w') {
+    } else if (data == 'w') {                       // go forward
         FwdBackOffset = FwdBackOffset - 0.2;
-    } else if (data == 's') {
+    } else if (data == 's') {                       // go backward
         FwdBackOffset = FwdBackOffset + 0.2;
-    } else {
+    } else if (data == 'r') {                       // reset position
+        turnrate = 0;
+        FwdBackOffset = 0;
+        reset = 1;
+    } else {                                        // reset speed
         turnrate = 0;
         FwdBackOffset = 0;
     }
