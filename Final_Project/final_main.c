@@ -160,8 +160,11 @@ int32_t calibration_count = 0;
 
 
 // (Final Project) position tracking variables
+int stage = 0; // moving stage
 float xm = 0.0; // m, Wheel axle midpoint position in X axis
 float ym = 0.0; // m, Wheel axle midpoint position in Y axis
+float xT = 0.0; // m, target position in X axis
+float yT = 0.0; // m, target position in Y axis
 float xm_dot = 0.0; // m/s, Midpoint velocity on X axis
 float ym_dot = 0.0; // m/s, Midpoint velocity on Y axis
 float xm_dot_1 = 0.0;
@@ -173,6 +176,7 @@ float theta_dot = 0.0; // Rad/s, Average turning speed of wheels
 float theta = 0.0; // Rad, Average angle of left and right wheel
 float theta_1 = 0.0;
 float phi = 0.0; // Rad, Body yaw angle
+float phi_T = 0.0; // Rad, direction from position now to target
 float W = 0.182; // m, Distance between the centers of the two wheels
 int reset = 0; // Reset flag for reset position to zero (also set LeftWheel and RightWheel to zero)
 
@@ -628,7 +632,7 @@ __interrupt void SWI_isr(void) {
     theta_left = theta_left + (LeftWheel - LeftWheel_1);
     theta_right = theta_right + (RightWheel - RightWheel_1);
     theta = 0.5 * (theta_left + theta_right);
-    phi = Rw / W * (theta_left - theta_right);
+    phi = Rw / W * (theta_right - theta_left);
     theta_dot = (theta - theta_1) / 0.004;
     xm_dot = Rw * theta_dot * cos(phi);
     ym_dot = Rw * theta_dot * sin(phi);
@@ -640,6 +644,33 @@ __interrupt void SWI_isr(void) {
     ym_dot = ym_dot_1;
     LeftWheel_1 = LeftWheel;
     RightWheel_1 = RightWheel;
+
+    // Final project auto move part
+    if (stage == 0) {    // prepare stage
+        phi_T = atan2(yT-ym,xT-xm);  // specify the direction towards the target
+    }
+    if (stage == 1) {    // turning stage
+        if (fabs(phi_T - phi) < 0.015) { // if the error between phi and phi_T is small enough, stop turning and go to stage 2
+            turnrate = 0.0;
+            stage = 2;
+        }
+        else if (phi_T > 0) {
+            turnrate = -1.0; // turn left to face the target
+        }
+        else if (phi_T < 0) {
+            turnrate = 1.0; // turn right to face the target
+        }
+    }
+    if (stage == 2) {    // moving stage
+        if ((fabs(xm-xT) < 0.01) && (fabs(ym-yT) < 0.01)) {
+            turnrate = 0.0;
+            FwdBackOffset = 0.0;
+            stage = 3;
+        }
+        else {
+            FwdBackOffset = -1.5;
+        }
+    }
 
 
     numSWIcalls++;
@@ -931,6 +962,8 @@ void serialRXA(serial_t *s, char data) {
         turnrate = 0;
         FwdBackOffset = 0;
         reset = 1;
+    } else if (data == 't') {                       // start auto moving
+        stage = 1;
     } else {                                        // reset speed
         turnrate = 0;
         FwdBackOffset = 0;
